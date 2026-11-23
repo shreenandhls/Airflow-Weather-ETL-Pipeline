@@ -1,45 +1,286 @@
-Overview
-========
+# Airflow Weather ETL Pipeline
 
-Welcome to Astronomer! This project was generated after you ran 'astro dev init' using the Astronomer CLI. This readme describes the contents of the project, as well as how to run Apache Airflow on your local machine.
+An automated weather data ETL pipeline built using **Apache Airflow, Python, PostgreSQL, Docker and the Open-Meteo API**.
 
-Project Contents
-================
+This project extracts current weather conditions for Tokyo, transforms the API response into structured records, and loads the processed data into a PostgreSQL database using an Airflow-managed workflow.
 
-Your Astro project contains the following files and folders:
+## Project Overview
 
-- dags: This folder contains the Python files for your Airflow Dags. By default, this directory includes one example Dag:
-    - `example_astronauts`: This Dag shows a simple ETL pipeline example that queries the list of astronauts currently in space from the Open Notify API and prints a statement for each astronaut. The Dag uses the TaskFlow API to define tasks in Python, and dynamic task mapping to dynamically print a statement for each astronaut. For more on how this Dag works, see our [Getting started tutorial](https://www.astronomer.io/docs/learn/get-started-with-airflow).
-- Dockerfile: This file contains a versioned Astro Runtime Docker image that provides a differentiated Airflow experience. If you want to execute other commands or overrides at runtime, specify them here.
-- include: This folder contains any additional files that you want to include as part of your project. It is empty by default.
-- packages.txt: Install OS-level packages needed for your project by adding them to this file. It is empty by default.
-- requirements.txt: Install Python packages needed for your project by adding them to this file. It is empty by default.
-- plugins: Add custom or community plugins for your project to this file. It is empty by default.
-- airflow_settings.yaml: Use this local-only file to specify Airflow Connections, Variables, and Pools instead of entering them in the Airflow UI as you develop Dags in this project.
+The purpose of this project is to demonstrate an end-to-end ETL pipeline using Apache Airflow for workflow orchestration and PostgreSQL for data storage.
 
-Deploy Your Project Locally
-===========================
+The pipeline follows three main stages:
 
-Start Airflow on your local machine by running 'astro dev start'.
+1. **Extract:** Retrieve current weather information from the Open-Meteo API.
+2. **Transform:** Process the JSON response and organize weather attributes into a structured record.
+3. **Load:** Insert the transformed record into PostgreSQL.
 
-This command will spin up five Docker containers on your machine, each for a different Airflow component:
+Apache Airflow manages task dependencies, execution and scheduling.
 
-- Postgres: Airflow's Metadata Database
-- Scheduler: The Airflow component responsible for monitoring and triggering tasks
-- Dag Processor: The Airflow component responsible for parsing Dags
-- API Server: The Airflow component responsible for serving the Airflow UI and API
-- Triggerer: The Airflow component responsible for triggering deferred tasks
+## Architecture
 
-When all five containers are ready the command will open the browser to the Airflow UI at http://localhost:8080/. You should also be able to access your Postgres Database at 'localhost:5432/postgres' with username 'postgres' and password 'postgres'.
+```text
+┌─────────────────┐      ┌─────────────────┐    ┌──────────────────┐     ┌─────────────────┐    ┌──────────────────┐
+│  Open-Meteo API │ ───▶| Extract Weather │───▶│ Transform Weather│───▶│  Load Weather   │───▶│   PostgreSQL     │
+│                 │      │      Data       │    │       Data       │     │      Data       │    │ Weather Database │
+└─────────────────┘      └─────────────────┘    └──────────────────┘     └─────────────────┘    └──────────────────┘
+                              ▲                       ▲                       ▲
+                              └───────────────────────┼───────────────────────┘
+                                                      │
+                                         ┌────────────────────────┐
+                                         │     Apache Airflow     │
+                                         │  Orchestrates All Tasks│
+                                         └────────────────────────┘
+```
 
-Note: If you already have either of the above ports allocated, you can either [stop your existing Docker containers or change the port](https://www.astronomer.io/docs/astro/cli/troubleshoot-locally#ports-are-not-available-for-my-local-airflow-webserver).
+## Technologies Used
 
-Deploy Your Project to Astronomer
-=================================
+| Technology | Purpose |
+|---|---|
+| Python | Data extraction and transformation |
+| Apache Airflow | Workflow orchestration |
+| PostgreSQL | Relational database |
+| Docker | Containerization |
+| Astro CLI | Local Airflow development |
+| Astro Runtime 3.4-1 | Airflow execution environment |
+| Open-Meteo API | Weather data source |
+| DBeaver | Database management |
+| Git & GitHub | Version control |
 
-If you have an Astronomer account, pushing code to a Deployment on Astronomer is simple. For deploying instructions, refer to Astronomer documentation: https://www.astronomer.io/docs/astro/deploy-code/
+## Data Source
 
-Contact
-=======
+The pipeline uses the [Open-Meteo API](https://open-meteo.com/) to retrieve current weather conditions.
 
-The Astronomer CLI is maintained with love by the Astronomer team. To report a bug or suggest a change, reach out to our support.
+**Location:** Tokyo, Japan
+
+**Coordinates:**
+- Latitude: 35.6895
+- Longitude: 139.6917
+
+### Weather attributes collected
+
+| Attribute | Description |
+|---|---|
+| observation_time | Weather observation timestamp |
+| temperature | Temperature in Celsius |
+| humidity | Relative humidity percentage |
+| precipitation | Precipitation in millimetres |
+| pressure | Atmospheric pressure in hPa |
+| weather_code | Weather condition code |
+| apparent_temperature | Feels-like temperature |
+| is_day | Daytime or nighttime indicator |
+
+All timestamps are handled in GMT/UTC.
+
+## ETL Workflow
+
+### 1. Extraction
+
+The `extract_weather` task uses Airflow's `HttpHook` to send a GET request to the Open-Meteo Forecast API.
+
+It retrieves the current weather response in JSON format.
+
+### 2. Transformation
+
+The `transform_weather` task processes the API response using Python.
+
+Transformation operations include:
+
+- Extracting current weather attributes.
+- Parsing the observation timestamp using Pendulum.
+- Handling the timestamp in UTC.
+- Converting the daytime indicator into a Boolean value.
+- Structuring the values into a tuple for database insertion.
+
+### 3. Loading
+
+The `load_weather` task uses Airflow's `PostgresHook` to connect to PostgreSQL.
+
+The task:
+
+- Creates the `weather_data` table if it does not exist.
+- Inserts the transformed weather record.
+- Uses `observation_time` as the primary key.
+- Uses PostgreSQL `ON CONFLICT` to update existing records with matching timestamps.
+
+This prevents duplicate records for the same observation timestamp.
+
+## Database Schema
+
+**Database table:** `weather_data`
+
+| Column | Data Type |
+|---|---|
+| observation_time | TIMESTAMPTZ (PRIMARY KEY) |
+| temperature | DOUBLE PRECISION |
+| humidity | DOUBLE PRECISION |
+| precipitation | DOUBLE PRECISION |
+| pressure | DOUBLE PRECISION |
+| weather_code | INTEGER |
+| apparent_temperature | DOUBLE PRECISION |
+| is_day | BOOLEAN |
+
+## Project Structure
+
+```text
+ETL Weather Pipeline/
+│
+├── dags/
+│   ├── weather_data_DAG.py
+│   ├── exampledag.py
+│   └── .airflowignore
+│
+├── tests/
+│   └── dags/
+│       └── test_dag_example.py
+│
+├── include/
+├── plugins/
+│
+├── Dockerfile
+├── requirements.txt
+├── packages.txt
+├── .dockerignore
+├── airflow_settings.yaml
+└── README.md
+```
+
+## Local Setup and Execution
+
+### Prerequisites
+
+Install the following tools:
+
+- Python
+- Docker Desktop
+- Astro CLI
+- Git
+- DBeaver (optional)
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/shreenandhls/Airflow-Weather-ETL-Pipeline.git
+
+cd Airflow-Weather-ETL-Pipeline
+```
+
+### 2. Start the Airflow environment
+
+```bash
+astro dev start
+```
+
+Astro CLI starts the local Airflow environment using Docker containers.
+
+### 3. Configure Airflow connections
+
+Create the following Airflow connections.
+
+**Open-Meteo HTTP Connection**
+
+| Field | Value |
+|---|---|
+| Connection ID | open_meteo |
+| Connection Type | HTTP |
+| Host | api.open-meteo.com |
+| Schema | https |
+
+**PostgreSQL Connection**
+
+| Field | Value |
+|---|---|
+| Connection ID | postgres_default |
+| Connection Type | PostgreSQL |
+| Host | Your PostgreSQL container hostname |
+| Port | 5432 |
+| Database | Your PostgreSQL database |
+| Username | Your PostgreSQL username |
+| Password | Your PostgreSQL password |
+
+Configure credentials for your own environment. Do not commit passwords to GitHub.
+
+### 4. Access the Airflow UI
+
+Open:
+
+http://localhost:8080
+
+Find the `weather_data` DAG and trigger it manually.
+
+### 5. Monitor the workflow
+
+Monitor the following tasks in the Airflow UI:
+
+- `extract_weather`
+- `transform_weather`
+- `load_weather`
+
+Check the task logs to verify successful execution.
+
+### 6. Verify the database
+
+Connect to PostgreSQL using DBeaver and execute:
+
+```sql
+SELECT *
+FROM weather_data
+ORDER BY observation_time DESC;
+```
+
+To check the number of records:
+
+```sql
+SELECT COUNT(*)
+FROM weather_data;
+```
+
+## Airflow Scheduling
+
+The current DAG configuration uses:
+
+```python
+schedule="@daily"
+catchup=False
+max_active_runs=1
+```
+
+This schedules the pipeline once per day.
+
+To collect current weather snapshots every hour, change the schedule to:
+
+```python
+schedule="@hourly"
+```
+
+## Key Features
+
+- Automated ETL workflow using Apache Airflow.
+- API integration using Open-Meteo.
+- Python-based data transformation.
+- PostgreSQL database integration.
+- UTC/GMT timestamp handling.
+- Duplicate prevention using primary keys and conflict handling.
+- Docker-based development environment.
+- Airflow task monitoring and execution management.
+
+## Future Enhancements
+
+- Collect weather information from multiple cities.
+- Store historical weather observations.
+- Integrate hourly and daily weather forecasts.
+- Build a weather analytics dashboard.
+- Implement data quality checks.
+- Add failure notifications and logging.
+- Deploy the pipeline to a cloud platform.
+
+## Author
+
+**Shreenandh L S**
+
+GitHub Repository:
+
+https://github.com/shreenandhls/Airflow-Weather-ETL-Pipeline
+
+---
+
+*This project demonstrates practical data engineering concepts, including API integration, ETL development, workflow orchestration, containerization and relational database management.*
